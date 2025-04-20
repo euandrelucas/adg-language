@@ -1,4 +1,3 @@
-```markdown
 # ADG Language
 
 ADG (André Development Grammar) é uma linguagem de programação experimental interpretada, desenvolvida em Rust, com foco na simplicidade, modularidade e extensibilidade. Possui sintaxe semelhante ao JavaScript, suporte a funções, controle de fluxo, arrays, sistema de módulos e execução via CLI.
@@ -126,4 +125,3 @@ Desenvolvido por André Lucas – [andrepaiva.dev](https://andrepaiva.dev)
 ## 📄 Licença
 
 Este projeto está licenciado sob a licença MIT.
-```
