@@ -14,8 +14,8 @@ adg_lang/
 ├── Cargo.toml
 
 #### ✅ Controle de fluxo
-- [ ] `else` nos blocos `if`
-- [ ] `while`, `for`, `break`, `continue`
+- [x] `else` nos blocos `if`
+- [X] `while`, `for`, `break`, `continue`
 
 #### ✅ Definição de funções
 - [X] Suporte a `fn nome(args) { ... }`

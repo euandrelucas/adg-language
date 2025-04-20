@@ -2,44 +2,62 @@ mod lexer;
 mod parser;
 mod interpreter;
 
-use lexer::Lexer;
-use parser::Parser;
-use interpreter::Interpreter;
+use std::fs;
+use std::env;
+
+use crate::lexer::Lexer;
+use crate::parser::Parser;
+use crate::interpreter::Interpreter;
 
 fn main() {
-    let code = r#"
-        fn greet(name) {
-            print("Hello, ");
-            print(name);
-        }
+    let args: Vec<String> = env::args().collect();
 
-        greet("André");
+    let code = if args.len() > 1 {
+        let filename = &args[1];
+        fs::read_to_string(filename)
+            .unwrap_or_else(|_| panic!("Não foi possível ler o arquivo {}", filename))
+    } else {
+        r#"
+            fn hello(name) {
+                print("Olá, " + name);
+            }
 
-        let idade = 18;
-        if (idade >= 18) {
-            print("maior de idade");
-        } else {
-            print("menor de idade");
-        }
+            let nome = "André";
+            hello(nome);
 
-        let i = 0;
-        looping (i < 3) {
-            print(i);
-            i = i + 1;
-        }
-    "#;
+            const idade = 18;
 
-    let mut lexer = Lexer::new(code);
-    let tokens = lexer.tokenize();
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse();
+            if (idade >= 18) {
+                print("maior de idade");
+            } else {
+                print("menor de idade");
+            }
 
-    println!("\n🌳 AST:");
-    for stmt in &program {
+            let i = 0;
+            looping (i < 3) {
+                print(i);
+                i = i + 1;
+            }
+
+            for (let j = 0; j < 2; j = j + 1) {
+                print("j é " + j);
+                if (j == 1) {
+                    break;
+                }
+            }
+        "#.to_string()
+    };
+
+    let lexer = Lexer::new(&code);
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse();
+
+    println!("🌳 AST:");
+    for stmt in &ast {
         println!("{:#?}", stmt);
     }
 
     println!("\n🧠 Execução:");
     let mut interpreter = Interpreter::new();
-    interpreter.execute(program);
+    interpreter.execute(ast);
 }

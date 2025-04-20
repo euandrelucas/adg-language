@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::parser::{Expr, Literal, Stmt};
+use crate::parser::{Stmt, Expr, Literal};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -7,91 +7,184 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Null,
-    Function(Vec<String>, Vec<Stmt>),
+    Return(Box<Value>),
 }
 
-#[derive(Debug)]
+impl Value {
+    fn as_number(&self) -> f64 {
+        match self {
+            Value::Number(n) => *n,
+            _ => panic!("Esperado número, encontrou {:?}", self),
+        }
+    }
+
+    fn as_bool(&self) -> bool {
+        match self {
+            Value::Boolean(b) => *b,
+            _ => panic!("Esperado booleano, encontrou {:?}", self),
+        }
+    }
+
+    fn as_string(&self) -> String {
+        match self {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Boolean(b) => b.to_string(),
+            Value::Null => "null".to_string(),
+            Value::Return(val) => val.as_string(),
+        }
+    }
+}
+
 pub struct Interpreter {
-    pub variables: HashMap<String, (Value, bool)>,
-    return_flag: Option<Value>,
+    variables: HashMap<String, (Value, bool)>,
+    functions: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    break_loop: bool,
+    continue_loop: bool,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        Self {
+        Interpreter {
             variables: HashMap::new(),
-            return_flag: None,
+            functions: HashMap::new(),
+            break_loop: false,
+            continue_loop: false,
         }
     }
 
     pub fn execute(&mut self, stmts: Vec<Stmt>) {
         for stmt in stmts {
-            self.exec_stmt(stmt);
-            if self.return_flag.is_some() {
+            if let Some(Value::Return(_)) = self.exec_stmt(stmt) {
                 break;
+            }
+            if self.break_loop {
+                self.break_loop = false;
             }
         }
     }
 
-    fn exec_stmt(&mut self, stmt: Stmt) {
+    fn exec_stmt(&mut self, stmt: Stmt) -> Option<Value> {
         match stmt {
             Stmt::VarDecl { name, value, is_const } => {
                 let val = self.eval_expr(value);
                 self.variables.insert(name, (val, is_const));
+                None
             }
-            Stmt::Assign { name, value } => {
-                let val = self.eval_expr(value);
+
+            Stmt::Assignment(name, expr) => {
+                let val = self.eval_expr(*expr);
                 if let Some((_, is_const)) = self.variables.get(&name) {
                     if *is_const {
-                        panic!("Cannot reassign to constant '{}'.", name);
+                        panic!("Impossível reatribuir constante '{}'", name);
                     }
                 }
-                self.variables.insert(name, (val, false));
+                self.variables.insert(name, (val.clone(), false));
+                None
             }
+
             Stmt::Expression(expr) => {
                 self.eval_expr(expr);
+                None
             }
+
             Stmt::If { condition, then_branch, else_branch } => {
                 if self.eval_expr(condition).as_bool() {
                     for stmt in then_branch {
-                        self.exec_stmt(stmt);
-                        if self.return_flag.is_some() {
-                            return;
+                        if let Some(ret) = self.exec_stmt(stmt) {
+                            return Some(ret);
+                        }
+                        if self.break_loop || self.continue_loop {
+                            break;
                         }
                     }
-                } else if let Some(branch) = else_branch {
-                    for stmt in branch {
-                        self.exec_stmt(stmt);
-                        if self.return_flag.is_some() {
-                            return;
+                } else if let Some(else_branch) = else_branch {
+                    for stmt in else_branch {
+                        if let Some(ret) = self.exec_stmt(stmt) {
+                            return Some(ret);
+                        }
+                        if self.break_loop || self.continue_loop {
+                            break;
                         }
                     }
                 }
+                None
             }
+
             Stmt::Looping { condition, body } => {
                 while self.eval_expr(condition.clone()).as_bool() {
                     for stmt in &body {
-                        self.exec_stmt(stmt.clone());
-                        if self.return_flag.is_some() {
-                            return;
+                        if let Some(ret) = self.exec_stmt(stmt.clone()) {
+                            return Some(ret);
+                        }
+                        if self.break_loop {
+                            self.break_loop = false;
+                            return None;
+                        }
+                        if self.continue_loop {
+                            self.continue_loop = false;
+                            break;
                         }
                     }
                 }
+                None
             }
+
+            Stmt::For { init, condition, update, body } => {
+                self.exec_stmt(*init);
+                while self.eval_expr(condition.clone()).as_bool() {
+                    for stmt in &body {
+                        if let Some(ret) = self.exec_stmt(stmt.clone()) {
+                            return Some(ret);
+                        }
+                        if self.break_loop {
+                            self.break_loop = false;
+                            return None;
+                        }
+                        if self.continue_loop {
+                            self.continue_loop = false;
+                            break;
+                        }
+                    }
+                    self.eval_expr(update.clone());
+                }
+                None
+            }
+
+            Stmt::Break => {
+                self.break_loop = true;
+                None
+            }
+
+            Stmt::Continue => {
+                self.continue_loop = true;
+                None
+            }
+
             Stmt::Function { name, params, body } => {
-                self.variables.insert(name, (Value::Function(params, body), true));
+                self.functions.insert(name, (params, body));
+                None
             }
+
             Stmt::Return(expr) => {
-                let val = self.eval_expr(expr);
-                self.return_flag = Some(val);
+                if let Some(e) = expr {
+                    let val = self.eval_expr(e);
+                    Some(Value::Return(Box::new(val)))
+                } else {
+                    Some(Value::Return(Box::new(Value::Null)))
+                }
             }
+
             Stmt::Block(stmts) => {
                 for stmt in stmts {
-                    self.exec_stmt(stmt);
-                    if self.return_flag.is_some() {
-                        return;
+                    if let Some(ret) = self.exec_stmt(stmt) {
+                        return Some(ret);
+                    }
+                    if self.break_loop || self.continue_loop {
+                        break;
                     }
                 }
+                None
             }
         }
     }
@@ -104,17 +197,36 @@ impl Interpreter {
                 Literal::Boolean(b) => Value::Boolean(b),
                 Literal::Null => Value::Null,
             },
+
             Expr::Variable(name) => {
-                self.variables.get(&name).map(|(v, _)| v.clone()).unwrap_or_else(|| panic!("Variable '{}' not defined", name))
+                self.variables
+                    .get(&name)
+                    .map(|(v, _)| v.clone())
+                    .unwrap_or_else(|| panic!("Variável '{}' não definida", name))
             }
+
+            Expr::Assignment(name, value_expr) => {
+                let value = self.eval_expr(*value_expr);
+                if let Some((_, is_const)) = self.variables.get(&name) {
+                    if *is_const {
+                        panic!("Impossível reatribuir constante '{}'", name);
+                    }
+                }
+                self.variables.insert(name.clone(), (value.clone(), false));
+                value
+            }
+
             Expr::BinaryOp(lhs, op, rhs) => {
                 let l = self.eval_expr(*lhs);
                 let r = self.eval_expr(*rhs);
+
                 match op.as_str() {
                     "+" => match (l, r) {
                         (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
                         (Value::String(a), Value::String(b)) => Value::String(a + &b),
-                        _ => panic!("Invalid '+' operation"),
+                        (Value::String(a), b) => Value::String(a + &b.as_string()),
+                        (a, Value::String(b)) => Value::String(a.as_string() + &b),
+                        _ => panic!("Operação '+' inválida"),
                     },
                     "-" => Value::Number(l.as_number() - r.as_number()),
                     "*" => Value::Number(l.as_number() * r.as_number()),
@@ -125,61 +237,42 @@ impl Interpreter {
                     "<=" => Value::Boolean(l.as_number() <= r.as_number()),
                     "==" => Value::Boolean(l == r),
                     "!=" => Value::Boolean(l != r),
-                    _ => panic!("Unknown operator '{}'", op),
+                    _ => panic!("Unknown binary operator '{}'", op),
                 }
             }
+
             Expr::Call(name, args) => {
+                let args = args.into_iter().map(|a| self.eval_expr(a)).collect::<Vec<_>>();
+
                 if name == "print" {
                     for arg in args {
-                        println!("{}", self.eval_expr(arg).as_string());
+                        println!("{}", arg.as_string());
                     }
                     return Value::Null;
                 }
 
-                let (params, body) = match self.variables.get(&name) {
-                    Some((Value::Function(params, body), _)) => (params.clone(), body.clone()),
-                    _ => panic!("Function '{}' not defined", name),
-                };
+                if let Some((params, body)) = self.functions.get(&name) {
+                    if args.len() != params.len() {
+                        panic!("Função '{}' esperava {} argumentos, recebeu {}", name, params.len(), args.len());
+                    }
 
-                if args.len() != params.len() {
-                    panic!("Function '{}' expects {} arguments, got {}", name, params.len(), args.len());
+                    let mut new_scope = Interpreter::new();
+
+                    for (i, param) in params.iter().enumerate() {
+                        new_scope.variables.insert(param.clone(), (args[i].clone(), false));
+                    }
+
+                    for stmt in body {
+                        if let Some(Value::Return(val)) = new_scope.exec_stmt(stmt.clone()) {
+                            return *val;
+                        }
+                    }
+
+                    Value::Null
+                } else {
+                    panic!("Função '{}' não definida", name);
                 }
-
-                let mut new_scope = Interpreter::new();
-                for (p, a) in params.into_iter().zip(args) {
-                    let val = self.eval_expr(a);
-                    new_scope.variables.insert(p, (val, false));
-                }
-
-                new_scope.execute(body);
-                new_scope.return_flag.unwrap_or(Value::Null)
             }
-        }
-    }
-}
-
-impl Value {
-    fn as_number(&self) -> f64 {
-        match self {
-            Value::Number(n) => *n,
-            _ => panic!("Expected number, got {:?}", self),
-        }
-    }
-
-    fn as_bool(&self) -> bool {
-        match self {
-            Value::Boolean(b) => *b,
-            _ => panic!("Expected boolean, got {:?}", self),
-        }
-    }
-
-    fn as_string(&self) -> String {
-        match self {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => n.to_string(),
-            Value::Boolean(b) => b.to_string(),
-            Value::Null => "null".to_string(),
-            Value::Function(_, _) => "[function]".to_string(),
         }
     }
 }
