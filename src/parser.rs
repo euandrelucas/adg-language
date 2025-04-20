@@ -54,6 +54,13 @@ impl Parser {
         self.advance();
     }
 
+    fn expect_operator(&mut self, expected: &str) {
+        match &self.current {
+            Token::Operator(op) if op == expected => self.advance(),
+            other => panic!("Expected operator '{}', but found {:?}", expected, other),
+        }
+    }
+
     pub fn parse(&mut self) -> Vec<Stmt> {
         let mut stmts = vec![];
         while self.current != Token::EOF {
@@ -63,61 +70,55 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Stmt {
-        match &self.current {
-            Token::Let | Token::Const => self.var_decl(),
-            Token::If => self.if_stmt(),
-            Token::Looping => self.looping_stmt(),
-            Token::For => self.for_stmt(),
-            Token::Break => {
-                self.advance();
-                self.expect(&Token::Symbol(';'));
-                Stmt::Break
-            }
-            Token::Continue => {
-                self.advance();
-                self.expect(&Token::Symbol(';'));
-                Stmt::Continue
-            }
-            Token::Fn => self.function_stmt(),
-            Token::Return => self.return_stmt(),
+        match self.current {
+            Token::Let | Token::Const => self.variable_decl(),
+            Token::If => self.if_statement(),
+            Token::Looping => self.looping_statement(),
+            Token::For => self.for_statement(),
+            Token::Break => { self.advance(); Stmt::Break },
+            Token::Continue => { self.advance(); Stmt::Continue },
+            Token::Fn => self.function_statement(),
+            Token::Return => self.return_statement(),
             Token::Symbol('{') => self.block(),
-            _ => self.expression_stmt(),
+            _ => self.expression_statement(),
         }
     }
 
-    fn var_decl(&mut self) -> Stmt {
-        let is_const = self.current == Token::Const;
+    fn variable_decl(&mut self) -> Stmt {
+        let is_const = matches!(self.current, Token::Const);
         self.advance();
 
         let name = match &self.current {
-            Token::Identifier(id) => id.clone(),
+            Token::Identifier(name) => name.clone(),
             _ => panic!("Expected identifier after let/const"),
         };
         self.advance();
-        self.expect(&Token::Operator("=".to_string()));
-        let value = self.expression();
-        self.expect(&Token::Symbol(';'));
 
+        self.expect_operator("=");
+        let value = self.expression();
+
+        self.expect(&Token::Symbol(';'));
         Stmt::VarDecl { name, value, is_const }
     }
 
-    fn if_stmt(&mut self) -> Stmt {
+    fn if_statement(&mut self) -> Stmt {
         self.advance();
         self.expect(&Token::Symbol('('));
         let condition = self.expression();
         self.expect(&Token::Symbol(')'));
+
         let then_branch = match self.statement() {
             Stmt::Block(stmts) => stmts,
-            s => vec![s],
+            stmt => vec![stmt],
         };
 
         let else_branch = if self.current == Token::Else {
             self.advance();
-            let stmts = match self.statement() {
+            let branch = match self.statement() {
                 Stmt::Block(stmts) => stmts,
-                s => vec![s],
+                stmt => vec![stmt],
             };
-            Some(stmts)
+            Some(branch)
         } else {
             None
         };
@@ -125,38 +126,43 @@ impl Parser {
         Stmt::If { condition, then_branch, else_branch }
     }
 
-    fn looping_stmt(&mut self) -> Stmt {
+    fn looping_statement(&mut self) -> Stmt {
         self.advance();
         self.expect(&Token::Symbol('('));
         let condition = self.expression();
         self.expect(&Token::Symbol(')'));
+
         let body = match self.statement() {
             Stmt::Block(stmts) => stmts,
-            s => vec![s],
+            stmt => vec![stmt],
         };
+
         Stmt::Looping { condition, body }
     }
 
-    fn for_stmt(&mut self) -> Stmt {
+    fn for_statement(&mut self) -> Stmt {
         self.advance();
         self.expect(&Token::Symbol('('));
-        let init = Box::new(self.var_decl());
+
+        let init = Box::new(self.variable_decl());
         let condition = self.expression();
         self.expect(&Token::Symbol(';'));
         let update = self.expression();
+
         self.expect(&Token::Symbol(')'));
         let body = match self.statement() {
             Stmt::Block(stmts) => stmts,
-            s => vec![s],
+            stmt => vec![stmt],
         };
+
         Stmt::For { init, condition, update, body }
     }
 
-    fn function_stmt(&mut self) -> Stmt {
+    fn function_statement(&mut self) -> Stmt {
         self.advance();
 
         let name = match &self.current {
-            Token::Identifier(id) => id.clone(),
+            Token::Identifier(s) => s.clone(),
             _ => panic!("Expected function name"),
         };
         self.advance();
@@ -164,35 +170,36 @@ impl Parser {
         self.expect(&Token::Symbol('('));
         let mut params = vec![];
         while self.current != Token::Symbol(')') {
-            if let Token::Identifier(param) = &self.current {
-                params.push(param.clone());
+            if let Token::Identifier(s) = &self.current {
+                params.push(s.clone());
                 self.advance();
                 if self.current == Token::Symbol(',') {
                     self.advance();
                 }
             } else {
-                panic!("Expected parameter name, got {:?}", self.current);
+                panic!("Expected parameter name");
             }
         }
         self.expect(&Token::Symbol(')'));
 
         let body = match self.statement() {
             Stmt::Block(stmts) => stmts,
-            s => vec![s],
+            stmt => vec![stmt],
         };
 
         Stmt::Function { name, params, body }
     }
 
-    fn return_stmt(&mut self) -> Stmt {
+    fn return_statement(&mut self) -> Stmt {
         self.advance();
-        let expr = if self.current == Token::Symbol(';') {
-            None
+        if self.current == Token::Symbol(';') {
+            self.advance();
+            Stmt::Return(None)
         } else {
-            Some(self.expression())
-        };
-        self.expect(&Token::Symbol(';'));
-        Stmt::Return(expr)
+            let expr = self.expression();
+            self.expect(&Token::Symbol(';'));
+            Stmt::Return(Some(expr))
+        }
     }
 
     fn block(&mut self) -> Stmt {
@@ -205,19 +212,23 @@ impl Parser {
         Stmt::Block(stmts)
     }
 
-    fn expression_stmt(&mut self) -> Stmt {
+    fn expression_statement(&mut self) -> Stmt {
         let expr = self.expression();
-        self.expect(&Token::Symbol(';'));
+        if self.current == Token::Symbol(';') {
+            self.advance();
+        } else if self.current != Token::Symbol('}') {
+            panic!("Expected ';' after expression, but found {:?}", self.current);
+        }
         Stmt::Expression(expr)
-    }
+    }    
 
     fn expression(&mut self) -> Expr {
         self.assignment()
     }
-
+    
     fn assignment(&mut self) -> Expr {
         let expr = self.binary_expr();
-
+    
         if let Token::Operator(op) = &self.current {
             if op == "=" {
                 self.advance();
@@ -229,25 +240,23 @@ impl Parser {
                 }
             }
         }
-
+    
         expr
-    }
+    }    
 
     fn binary_expr(&mut self) -> Expr {
         let mut left = self.primary();
-
+    
         while let Token::Operator(op) = &self.current {
-            if op == "=" {
-                break;
-            }
+            if op == "=" { break; } // não trata '=' como operador aqui
             let op = op.clone();
             self.advance();
             let right = self.primary();
             left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
         }
-
+    
         left
-    }
+    }    
 
     fn primary(&mut self) -> Expr {
         match &self.current {
@@ -266,25 +275,45 @@ impl Parser {
                 self.advance();
                 Expr::Literal(Literal::Boolean(val))
             }
-            Token::Identifier(id) => {
-                let name = id.clone();
+            Token::Identifier(_) => self.parse_call_or_variable(),
+            Token::Symbol(';') => {
                 self.advance();
-                if self.current == Token::Symbol('(') {
-                    self.advance();
-                    let mut args = vec![];
-                    while self.current != Token::Symbol(')') {
-                        args.push(self.expression());
-                        if self.current == Token::Symbol(',') {
-                            self.advance();
-                        }
-                    }
-                    self.expect(&Token::Symbol(')'));
-                    Expr::Call(name, args)
-                } else {
-                    Expr::Variable(name)
-                }
+                Expr::Literal(Literal::Null)
             }
             unexpected => panic!("Unexpected expression: {:?}", unexpected),
+        }
+    }       
+
+    fn parse_call_or_variable(&mut self) -> Expr {
+        let mut name = match &self.current {
+            Token::Identifier(s) => s.clone(),
+            _ => panic!("Expected identifier"),
+        };
+        self.advance();
+
+        while self.current == Token::Symbol('.') {
+            self.advance();
+            let part = match &self.current {
+                Token::Identifier(s) => s.clone(),
+                _ => panic!("Expected identifier after '.'"),
+            };
+            self.advance();
+            name = format!("{}.{}", name, part);
+        }
+
+        if self.current == Token::Symbol('(') {
+            self.advance();
+            let mut args = vec![];
+            while self.current != Token::Symbol(')') {
+                args.push(self.expression());
+                if self.current == Token::Symbol(',') {
+                    self.advance();
+                }
+            }
+            self.expect(&Token::Symbol(')'));
+            Expr::Call(name, args)
+        } else {
+            Expr::Variable(name)
         }
     }
 }

@@ -1,3 +1,5 @@
+pub mod runtime;
+
 mod lexer;
 mod parser;
 mod interpreter;
@@ -45,6 +47,15 @@ fn main() {
                     break;
                 }
             }
+
+            let raiz = math.sqrt(25);
+            print("raiz: " + raiz);
+
+            let potencia = math.pow(2, 3);
+            print("potência: " + potencia);
+
+            let aleatorio = math.random();
+            print("aleatório: " + aleatorio);
         "#.to_string()
     };
 

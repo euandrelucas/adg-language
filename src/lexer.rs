@@ -1,21 +1,25 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    Looping,
     Let,
     Const,
     Fn,
-    Return,
     If,
     Else,
-    Looping,
+    While,
     For,
+    Return,
+    Throw,
+    Try,
+    Catch,
+    Switch,
+    Case,
     Break,
     Continue,
-
     Identifier(String),
     Number(f64),
     String(String),
     Boolean(bool),
-
     Operator(String),
     Symbol(char),
     EOF,
@@ -37,20 +41,21 @@ impl Lexer {
 
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
+
         if self.position >= self.input.len() {
             return Token::EOF;
         }
 
         let current = self.input[self.position];
 
-        // Number
+        // Número
         if current.is_ascii_digit() {
             return self.lex_number();
         }
 
-        // Identifier or keyword
+        // Identificador ou palavra-chave
         if current.is_ascii_alphabetic() || current == '_' {
-            return self.lex_identifier();
+            return self.lex_identifier_or_keyword();
         }
 
         // String
@@ -58,7 +63,7 @@ impl Lexer {
             return self.lex_string();
         }
 
-        // Operators and symbols
+        // Operadores e símbolos
         match current {
             '+' | '-' | '*' | '/' => {
                 self.position += 1;
@@ -75,7 +80,7 @@ impl Lexer {
                 Token::Operator(op)
             }
 
-            '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',' => {
+            '{' | '}' | '(' | ')' | '[' | ']' | ';' | ':' | ',' | '.' => {
                 self.position += 1;
                 Token::Symbol(current)
             }
@@ -89,6 +94,7 @@ impl Lexer {
 
     fn lex_number(&mut self) -> Token {
         let start = self.position;
+
         while self.position < self.input.len() && self.input[self.position].is_ascii_digit() {
             self.position += 1;
         }
@@ -104,24 +110,33 @@ impl Lexer {
         Token::Number(num_str.parse().unwrap_or(0.0))
     }
 
-    fn lex_identifier(&mut self) -> Token {
+    fn lex_identifier_or_keyword(&mut self) -> Token {
         let start = self.position;
+
         while self.position < self.input.len()
-            && (self.input[self.position].is_ascii_alphanumeric() || self.input[self.position] == '_')
+            && (self.input[self.position].is_ascii_alphanumeric()
+                || self.input[self.position] == '_')
         {
             self.position += 1;
         }
 
         let ident: String = self.input[start..self.position].iter().collect();
+
         match ident.as_str() {
+            "looping" => Token::Looping,
             "let" => Token::Let,
             "const" => Token::Const,
             "fn" => Token::Fn,
-            "return" => Token::Return,
             "if" => Token::If,
             "else" => Token::Else,
-            "looping" => Token::Looping,
+            "while" => Token::While,
             "for" => Token::For,
+            "return" => Token::Return,
+            "throw" => Token::Throw,
+            "try" => Token::Try,
+            "catch" => Token::Catch,
+            "switch" => Token::Switch,
+            "case" => Token::Case,
             "break" => Token::Break,
             "continue" => Token::Continue,
             "true" => Token::Boolean(true),
@@ -131,13 +146,16 @@ impl Lexer {
     }
 
     fn lex_string(&mut self) -> Token {
-        self.position += 1; // skip opening quote
+        self.position += 1; // pula o "
         let start = self.position;
+
         while self.position < self.input.len() && self.input[self.position] != '"' {
             self.position += 1;
         }
+
         let content: String = self.input[start..self.position].iter().collect();
-        self.position += 1; // skip closing quote
+        self.position += 1; // pula o fechamento "
+
         Token::String(content)
     }
 
