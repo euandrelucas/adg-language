@@ -1,14 +1,12 @@
-use std::iter::Peekable;
-use std::str::Chars;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Looping,
     Let,
     Const,
     Fn,
+    Return,
     If,
     Else,
+    Looping,
     Identifier(String),
     Number(f64),
     String(String),
@@ -16,97 +14,111 @@ pub enum Token {
     Operator(String),
     Symbol(char),
     EOF,
+    Unknown(String),
 }
 
-pub struct Lexer<'a> {
-    input: Peekable<Chars<'a>>,
+pub struct Lexer {
+    input: Vec<char>,
+    pos: usize,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Lexer {
-            input: source.chars().peekable(),
+impl Lexer {
+    pub fn new(source: &str) -> Self {
+        Self {
+            input: source.chars().collect(),
+            pos: 0,
         }
     }
 
-    pub fn next_token(&mut self) -> Token {
-        self.skip_whitespace();
+    pub fn tokenize(&mut self) -> Vec<Token> {
+        let mut tokens = vec![];
 
-        match self.input.next() {
-            Some(c) if c.is_ascii_alphabetic() || c == '_' => {
-                let mut ident = c.to_string();
-                while let Some(&ch) = self.input.peek() {
-                    if ch.is_ascii_alphanumeric() || ch == '_' {
-                        ident.push(ch);
-                        self.input.next();
-                    } else {
-                        break;
-                    }
+        while let Some(&c) = self.input.get(self.pos) {
+            match c {
+                ' ' | '\n' | '\r' | '\t' => {
+                    self.pos += 1;
                 }
-
-                return match ident.as_str() {
-                    "let" => Token::Let,
-                    "const" => Token::Const,
-                    "fn" => Token::Fn,
-                    "if" => Token::If,
-                    "else" => Token::Else,
-                    "looping" => Token::Looping,
-                    "true" => Token::Boolean(true),
-                    "false" => Token::Boolean(false),
-                    _ => Token::Identifier(ident),
-                };
-            }
-
-            Some(c) if c.is_ascii_digit() => {
-                let mut number = c.to_string();
-                while let Some(&ch) = self.input.peek() {
-                    if ch.is_ascii_digit() || ch == '.' {
-                        number.push(ch);
-                        self.input.next();
-                    } else {
-                        break;
-                    }
+                '0'..='9' => tokens.push(self.lex_number()),
+                '"' => tokens.push(self.lex_string()),
+                'a'..='z' | 'A'..='Z' | '_' => tokens.push(self.lex_identifier()),
+                '+' | '-' | '*' | '/' | '>' | '<' | '=' | '!' => tokens.push(self.lex_operator()),
+                '{' | '}' | '(' | ')' | ';' | ',' => {
+                    tokens.push(Token::Symbol(c));
+                    self.pos += 1;
                 }
-                return Token::Number(number.parse().unwrap_or(0.0));
-            }
-
-            Some('"') => {
-                let mut string = String::new();
-                while let Some(ch) = self.input.next() {
-                    if ch == '"' {
-                        break;
-                    }
-                    string.push(ch);
-                }
-                return Token::String(string);
-            }
-
-            Some(ch) => {
-                match ch {
-                    '=' | '!' | '<' | '>' => {
-                        if let Some('=') = self.input.peek() {
-                            self.input.next();
-                            return Token::Operator(format!("{}=", ch));
-                        }
-                        return Token::Operator(ch.to_string());
-                    }
-                    '+' | '-' | '*' | '/' => return Token::Operator(ch.to_string()),
-                    '{' | '}' | '(' | ')' | ';' | ',' => return Token::Symbol(ch),
-                    _ => self.next_token(), // ignora caracteres desconhecidos
+                _ => {
+                    tokens.push(Token::Unknown(c.to_string()));
+                    self.pos += 1;
                 }
             }
-
-            None => Token::EOF,
         }
+
+        tokens.push(Token::EOF);
+        tokens
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(&ch) = self.input.peek() {
-            if ch.is_whitespace() {
-                self.input.next();
+    fn lex_number(&mut self) -> Token {
+        let start = self.pos;
+        while let Some(c) = self.input.get(self.pos) {
+            if c.is_ascii_digit() || *c == '.' {
+                self.pos += 1;
             } else {
                 break;
             }
         }
+        let num_str: String = self.input[start..self.pos].iter().collect();
+        let number = num_str.parse().unwrap_or(0.0);
+        Token::Number(number)
+    }
+
+    fn lex_string(&mut self) -> Token {
+        self.pos += 1; // skip opening quote
+        let start = self.pos;
+        while let Some(&c) = self.input.get(self.pos) {
+            if c == '"' {
+                break;
+            }
+            self.pos += 1;
+        }
+        let content: String = self.input[start..self.pos].iter().collect();
+        self.pos += 1; // skip closing quote
+        Token::String(content)
+    }
+
+    fn lex_identifier(&mut self) -> Token {
+        let start = self.pos;
+        while let Some(&c) = self.input.get(self.pos) {
+            if c.is_alphanumeric() || c == '_' {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        let ident: String = self.input[start..self.pos].iter().collect();
+        match ident.as_str() {
+            "let" => Token::Let,
+            "const" => Token::Const,
+            "fn" => Token::Fn,
+            "giveback" => Token::Return,
+            "if" => Token::If,
+            "else" => Token::Else,
+            "looping" => Token::Looping,
+            "true" => Token::Boolean(true),
+            "false" => Token::Boolean(false),
+            _ => Token::Identifier(ident),
+        }
+    }
+
+    fn lex_operator(&mut self) -> Token {
+        let mut op = self.input[self.pos].to_string();
+        if let Some(next) = self.input.get(self.pos + 1) {
+            if *next == '=' {
+                op.push('=');
+                self.pos += 1;
+            }
+        }
+        self.pos += 1;
+        Token::Operator(op)
     }
 }

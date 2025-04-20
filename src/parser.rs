@@ -23,6 +23,8 @@ pub enum Stmt {
     Expression(Expr),
     If { condition: Expr, then_branch: Vec<Stmt>, else_branch: Option<Vec<Stmt>> },
     Looping { condition: Expr, body: Vec<Stmt> },
+    Function { name: String, params: Vec<String>, body: Vec<Stmt> },
+    Return(Expr),
     Block(Vec<Stmt>),
 }
 
@@ -48,7 +50,7 @@ impl Parser {
 
     fn expect(&mut self, expected: &Token) {
         if self.peek() != expected {
-            panic!("Esperado {:?}, mas encontrou {:?}", expected, self.peek());
+            panic!("Expected {:?}, got {:?}", expected, self.peek());
         }
         self.advance();
     }
@@ -64,52 +66,13 @@ impl Parser {
     fn statement(&mut self) -> Stmt {
         match self.peek() {
             Token::Let | Token::Const => self.var_decl(),
+            Token::Fn => self.function_decl(),
+            Token::Return => self.return_stmt(),
             Token::If => self.if_stmt(),
             Token::Looping => self.looping_stmt(),
             Token::Symbol('{') => self.block(),
-            Token::Identifier(_) => {
-                if let Token::Identifier(name) = self.advance() {
-                    if let Token::Operator(op) = self.peek() {
-                        if op == "=" {
-                            self.advance();
-                            let value = self.expression();
-                            self.expect(&Token::Symbol(';'));
-                            return Stmt::Assign { name, value };
-                        }
-                    }
-
-                    // Verificar se é chamada de função
-                    if *self.peek() == Token::Symbol('(') {
-                        self.advance();
-                        let mut args = vec![];
-
-                        if *self.peek() != Token::Symbol(')') {
-                            loop {
-                                args.push(self.expression());
-                                if *self.peek() == Token::Symbol(',') {
-                                    self.advance();
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-
-                        self.expect(&Token::Symbol(')'));
-                        self.expect(&Token::Symbol(';'));
-                        return Stmt::Expression(Expr::Call(name, args));
-                    }
-
-                    self.expect(&Token::Symbol(';'));
-                    Stmt::Expression(Expr::Variable(name))
-                } else {
-                    panic!("Expected identifier");
-                }
-            }
-            _ => {
-                let expr = self.expression();
-                self.expect(&Token::Symbol(';'));
-                Stmt::Expression(expr)
-            }
+            Token::Identifier(_) => self.assign_or_expr_stmt(),
+            _ => panic!("Unexpected token in statement: {:?}", self.peek()),
         }
     }
 
@@ -118,7 +81,7 @@ impl Parser {
         self.advance();
 
         let name = match self.advance() {
-            Token::Identifier(n) => n,
+            Token::Identifier(name) => name,
             t => panic!("Expected identifier, got {:?}", t),
         };
 
@@ -127,6 +90,81 @@ impl Parser {
         self.expect(&Token::Symbol(';'));
 
         Stmt::VarDecl { name, value, is_const }
+    }
+
+    fn assign_or_expr_stmt(&mut self) -> Stmt {
+        let name = match self.advance() {
+            Token::Identifier(n) => n,
+            _ => panic!("Expected identifier"),
+        };
+
+        if let Token::Operator(op) = self.peek() {
+            if op == "=" {
+                self.advance();
+                let value = self.expression();
+                self.expect(&Token::Symbol(';'));
+                return Stmt::Assign { name, value };
+            }
+        }
+
+        if *self.peek() == Token::Symbol('(') {
+            self.advance();
+            let mut args = vec![];
+            if *self.peek() != Token::Symbol(')') {
+                loop {
+                    args.push(self.expression());
+                    if *self.peek() == Token::Symbol(',') {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.expect(&Token::Symbol(')'));
+            self.expect(&Token::Symbol(';'));
+            return Stmt::Expression(Expr::Call(name, args));
+        }
+
+        panic!("Invalid expression statement starting with identifier '{}'.", name)
+    }
+
+    fn function_decl(&mut self) -> Stmt {
+        self.advance();
+        let name = match self.advance() {
+            Token::Identifier(n) => n,
+            t => panic!("Expected function name, got {:?}", t),
+        };
+
+        self.expect(&Token::Symbol('('));
+        let mut params = vec![];
+        if *self.peek() != Token::Symbol(')') {
+            loop {
+                if let Token::Identifier(p) = self.advance() {
+                    params.push(p);
+                } else {
+                    panic!("Expected parameter name");
+                }
+                if *self.peek() == Token::Symbol(',') {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(&Token::Symbol(')'));
+        let body = match self.statement() {
+            Stmt::Block(stmts) => stmts,
+            stmt => vec![stmt],
+        };
+
+        Stmt::Function { name, params, body }
+    }
+
+    fn return_stmt(&mut self) -> Stmt {
+        self.advance();
+        let expr = self.expression();
+        self.expect(&Token::Symbol(';'));
+        Stmt::Return(expr)
     }
 
     fn if_stmt(&mut self) -> Stmt {
@@ -184,7 +222,6 @@ impl Parser {
         let mut expr = self.primary();
 
         while let Token::Operator(op) = self.peek() {
-            if op == "=" { break; }
             let op = op.clone();
             self.advance();
             let right = self.primary();
@@ -200,7 +237,7 @@ impl Parser {
             Token::String(s) => Expr::Literal(Literal::String(s)),
             Token::Boolean(b) => Expr::Literal(Literal::Boolean(b)),
             Token::Identifier(name) => Expr::Variable(name),
-            other => panic!("Expressão inesperada: {:?}", other),
+            other => panic!("Unexpected expression: {:?}", other),
         }
     }
 }

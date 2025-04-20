@@ -18,8 +18,8 @@ adg_lang/
 - [ ] `while`, `for`, `break`, `continue`
 
 #### ✅ Definição de funções
-- [ ] Suporte a `fn nome(args) { ... }`
-- [ ] Suporte a `return`
+- [X] Suporte a `fn nome(args) { ... }`
+- [X] Suporte a `return` (giveback)
 
 #### ✅ Recursos nativos
 - [ ] Módulo `math` com `sqrt`, `pow`, `random`
