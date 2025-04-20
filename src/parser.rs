@@ -3,6 +3,7 @@ use crate::lexer::{Lexer, Token};
 #[derive(Debug, Clone)]
 pub enum Literal {
     Number(f64),
+    Array(Vec<Expr>),
     String(String),
     Boolean(bool),
     Null,
@@ -10,6 +11,7 @@ pub enum Literal {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
+    Index(Box<Expr>, Box<Expr>),
     Literal(Literal),
     Variable(String),
     BinaryOp(Box<Expr>, String, Box<Expr>),
@@ -259,7 +261,7 @@ impl Parser {
     }    
 
     fn primary(&mut self) -> Expr {
-        match &self.current {
+        let mut expr = match &self.current {
             Token::Number(n) => {
                 let val = *n;
                 self.advance();
@@ -275,14 +277,36 @@ impl Parser {
                 self.advance();
                 Expr::Literal(Literal::Boolean(val))
             }
+            Token::Symbol('[') => {
+                self.advance();
+                let mut elements = vec![];
+                while self.current != Token::Symbol(']') {
+                    elements.push(self.expression());
+                    if self.current == Token::Symbol(',') {
+                        self.advance();
+                    }
+                }
+                self.expect(&Token::Symbol(']'));
+                Expr::Literal(Literal::Array(elements))
+            }
             Token::Identifier(_) => self.parse_call_or_variable(),
             Token::Symbol(';') => {
                 self.advance();
                 Expr::Literal(Literal::Null)
             }
             unexpected => panic!("Unexpected expression: {:?}", unexpected),
+        };
+    
+        // Permitir indexação após qualquer expressão
+        while self.current == Token::Symbol('[') {
+            self.advance();
+            let index_expr = self.expression();
+            self.expect(&Token::Symbol(']'));
+            expr = Expr::Index(Box::new(expr), Box::new(index_expr));
         }
-    }       
+    
+        expr
+    }           
 
     fn parse_call_or_variable(&mut self) -> Expr {
         let mut name = match &self.current {
@@ -301,6 +325,15 @@ impl Parser {
             name = format!("{}.{}", name, part);
         }
 
+
+        let mut expr = Expr::Variable(name.clone());
+        while self.current == Token::Symbol('[') {
+            self.advance();
+            let index_expr = self.expression();
+            self.expect(&Token::Symbol(']'));
+            expr = Expr::Index(Box::new(expr), Box::new(index_expr));
+        }
+
         if self.current == Token::Symbol('(') {
             self.advance();
             let mut args = vec![];
@@ -313,7 +346,7 @@ impl Parser {
             self.expect(&Token::Symbol(')'));
             Expr::Call(name, args)
         } else {
-            Expr::Variable(name)
-        }
+            expr // 🧠 Aqui mantemos o expr com possível Index!
+        }        
     }
 }

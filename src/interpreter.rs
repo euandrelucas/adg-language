@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use crate::parser::{Expr, Literal, Stmt};
 use crate::runtime::math::get_math_module;
+use crate::runtime::style::get_style_module; // 👈 Adicionado
+use crate::runtime::filebox::get_filebox_module;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -14,6 +16,7 @@ pub enum Value {
         env: Env,
     },
     NativeFunction(fn(Vec<Value>) -> Value),
+    Array(Vec<Value>),
 }
 
 impl Value {
@@ -43,6 +46,10 @@ impl Value {
             }
             Value::Boolean(b) => b.to_string(),
             Value::Null => "null".to_string(),
+            Value::Array(arr) => {
+                let items: Vec<String> = arr.iter().map(|v| v.as_string()).collect();
+                format!("[{}]", items.join(", "))
+            }
             Value::Function { .. } => "[Function]".to_string(),
             Value::NativeFunction(_) => "[NativeFunction]".to_string(),
         }
@@ -80,10 +87,22 @@ impl Interpreter {
             Value::Null
         }));
 
+        // Módulo filebox (fb)
+        let filebox = get_filebox_module();
+        for (k, v) in filebox {
+            globals.insert(format!("fb.{}", k), v);
+        }
+
         // Módulo math
         let math = get_math_module();
         for (k, v) in math {
             globals.insert(format!("math.{}", k), v);
+        }
+
+        // Módulo style
+        let style = get_style_module();
+        for (k, v) in style {
+            globals.insert(format!("style.{}", k), v);
         }
 
         Interpreter {
@@ -185,11 +204,23 @@ impl Interpreter {
 
     fn eval_expr(&mut self, expr: Expr) -> Value {
         match expr {
+            Expr::Index(array_expr, index_expr) => {
+                let array = self.eval_expr(*array_expr);
+                let index = self.eval_expr(*index_expr).as_number() as usize;
+                match array {
+                    Value::Array(items) => items.get(index).cloned().unwrap_or(Value::Null),
+                    _ => panic!("Expected array for indexing, got {:?}", array),
+                }
+            }
             Expr::Literal(lit) => match lit {
                 Literal::Number(n) => Value::Number(n),
                 Literal::String(s) => Value::String(s),
                 Literal::Boolean(b) => Value::Boolean(b),
                 Literal::Null => Value::Null,
+                Literal::Array(items) => {
+                    let values = items.into_iter().map(|e| self.eval_expr(e)).collect();
+                    Value::Array(values)
+                }
             },
             Expr::Variable(name) => {
                 self.locals.get(&name)
